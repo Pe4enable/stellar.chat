@@ -272,9 +272,22 @@ function mapReport(detail, report) {
   };
 }
 
+function rememberAudit(auditId) {
+  const existing = audits.get(auditId);
+  if (existing) return existing;
+  const job = {
+    pollAfterSeconds: POLL_SECONDS,
+    nextPollAt: 0,
+    webUrl: dashboardUrl(auditId),
+    report: null,
+    snapshot: null,
+  };
+  audits.set(auditId, job);
+  return job;
+}
+
 async function readAudit(auditId) {
-  const job = audits.get(auditId);
-  if (!job) return null;
+  const job = rememberAudit(auditId);
   if (job.report) return job.report;
   if (Date.now() < job.nextPollAt && job.snapshot) return job.snapshot;
 
@@ -314,6 +327,33 @@ async function readAudit(auditId) {
     webUrl: job.webUrl,
   };
   return job.snapshot;
+}
+
+async function downloadReportPdf(auditId) {
+  const key = savantApiKey();
+  if (!key) {
+    throw new SavantError("SAVANT_API_KEY is not set. Export it in the environment that launches this app.", 500);
+  }
+  let response;
+  try {
+    response = await fetch(
+      `${BASE}/api/v1/audit-jobs/${encodeURIComponent(auditId)}/report/download?format=pdf`,
+      { headers: { Authorization: `Bearer ${key}`, Accept: "application/pdf, application/json" } },
+    );
+  } catch {
+    throw new SavantError("Could not reach Savant. Check the network connection.", 502);
+  }
+  if (!response.ok) {
+    const text = await response.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = null;
+    }
+    throw new SavantError(errorMessage(response.status, data), response.status);
+  }
+  return Buffer.from(await response.arrayBuffer());
 }
 
 function send(res, status, body) {
@@ -374,6 +414,18 @@ export async function handleAuditRequest(req, res) {
       const body = JSON.parse((await readBody(req)) || "{}");
       const tier = typeof body.tier === "string" ? body.tier : "";
       send(res, 200, await startAudit(decodeURIComponent(start[1]), tier));
+      return true;
+    }
+
+    const pdf = /^\/api\/audit\/([^/]+)\/report\.pdf$/.exec(url.pathname);
+    if (req.method === "GET" && pdf) {
+      const bytes = await downloadReportPdf(decodeURIComponent(pdf[1]));
+      res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": 'attachment; filename="audit-report.pdf"',
+        "Cache-Control": "no-store",
+      });
+      res.end(bytes);
       return true;
     }
 

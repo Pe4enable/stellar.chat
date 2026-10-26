@@ -398,11 +398,7 @@ export function App() {
             filename={filename}
             lines={archive ? 0 : lineCount(code)}
             detail={archive ? "archive" : undefined}
-            note={
-              archive
-                ? "Savant is auditing the archive. You can close this tab; the audit keeps running, and a completion email may arrive."
-                : "Savant is auditing the contract. You can close this tab; the audit keeps running, and a completion email may arrive."
-            }
+            note=""
             stage={stage}
             progress={progress}
             cancelLabel="Back to code"

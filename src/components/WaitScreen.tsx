@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatElapsed } from "../format";
 
-const WINDOW_MS = 15 * 60 * 1000;
+const WINDOW_MS = 30 * 60 * 1000;
 
 type Props = {
   startedAt: number;
@@ -52,7 +52,7 @@ export function WaitScreen({
       </div>
       <p className="kicker">{kicker}</p>
       <p className="clock">{formatElapsed(elapsed)}</p>
-      <p className="lead">{note}</p>
+      {note ? <p className="lead">{note}</p> : null}
       <p className="meta">
         {filename}
         {detail ? ` · ${detail}` : ` · ${lines} ${lines === 1 ? "line" : "lines"}`}
@@ -66,8 +66,8 @@ export function WaitScreen({
           </div>
           <p className="hint">
             {ratio >= 100
-              ? "Past the usual 15-minute window. Still waiting on Savant."
-              : "The bar marks the usual 15-minute window, not how finished the audit is."}
+              ? "Past the usual 30-minute window. Still waiting on Savant."
+              : "Depending on the size, an audit can take 15–30 minutes."}
           </p>
         </>
       ) : null}

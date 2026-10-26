@@ -13,6 +13,8 @@ type Props = {
 export function ReportView({ filename, elapsedMs, report, onBack }: Props) {
   const [filter, setFilter] = useState<"all" | Severity>("all");
   const [copied, setCopied] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [pdfError, setPdfError] = useState("");
   const language = languageFromFilename(filename);
 
   const ordered = useMemo(() => {
@@ -31,7 +33,33 @@ export function ReportView({ filename, elapsedMs, report, onBack }: Props) {
 
   const visible = filter === "all" ? ordered : ordered.filter((finding) => finding.severity === filter);
   const findingLabel = `${report.findings.length} ${report.findings.length === 1 ? "finding" : "findings"}`;
+  const auditId = auditIdFromWebUrl(report.webUrl);
   const showRaw = !report.findings.length && !report.text && !report.summary;
+
+  async function downloadPdf() {
+    if (!auditId || downloading) return;
+    setDownloading(true);
+    setPdfError("");
+    try {
+      const response = await fetch(`/api/audit/${encodeURIComponent(auditId)}/report.pdf`);
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error || "Savant could not build the PDF yet.");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const stem = filename.replace(/\.[^.]+$/, "") || "audit";
+      link.href = url;
+      link.download = `${stem}-report.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setPdfError(err instanceof Error ? err.message : "Download failed.");
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   async function copyReport() {
     const blocks = [
@@ -76,6 +104,11 @@ export function ReportView({ filename, elapsedMs, report, onBack }: Props) {
           </p>
         </div>
         <div className="row">
+          {auditId ? (
+            <button className="btn ghost" type="button" disabled={downloading} onClick={() => void downloadPdf()}>
+              {downloading ? "Downloading…" : "Download in pdf"}
+            </button>
+          ) : null}
           <button className="btn ghost" type="button" onClick={() => void copyReport()}>
             {copied ? "Copied" : "Copy"}
           </button>
@@ -84,6 +117,12 @@ export function ReportView({ filename, elapsedMs, report, onBack }: Props) {
           </button>
         </div>
       </header>
+
+      {pdfError ? (
+        <p className="banner" role="alert">
+          {pdfError}
+        </p>
+      ) : null}
 
       {report.summary ? (
         <div className="prose summary" dangerouslySetInnerHTML={{ __html: renderMarkdown(report.summary) }} />
@@ -153,4 +192,9 @@ export function ReportView({ filename, elapsedMs, report, onBack }: Props) {
       ) : null}
     </section>
   );
+}
+
+function auditIdFromWebUrl(webUrl: string | undefined): string {
+  const match = /\/audits\/([0-9a-f-]{36})/i.exec(webUrl || "");
+  return match?.[1] ?? "";
 }
