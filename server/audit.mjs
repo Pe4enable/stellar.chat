@@ -129,20 +129,31 @@ export function zipStored(filename, contents) {
   return Buffer.concat([local, name, data, central, name, end]);
 }
 
-function fileForm(code, filename, tier) {
-  const inner = safeFilename(filename);
-  const stem = inner.replace(/\.[^.]+$/, "") || "contract";
-  const zip = zipStored(inner, code);
+function isSupportedArchive(bytes) {
+  if (bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) {
+    return true;
+  }
+  if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) return true;
+  return bytes.length > 262 && bytes.subarray(257, 262).toString("ascii") === "ustar";
+}
+
+function fileForm(pending, tier) {
   const form = new FormData();
   form.append("tier", tier);
-  form.append("archive", new Blob([zip]), `${stem}.zip`);
+  if (pending.archive) {
+    form.append("archive", new Blob([pending.archive]), safeFilename(pending.filename));
+    return form;
+  }
+  const inner = safeFilename(pending.filename);
+  const stem = inner.replace(/\.[^.]+$/, "") || "contract";
+  form.append("archive", new Blob([zipStored(inner, pending.code)]), `${stem}.zip`);
   return form;
 }
 
-async function estimateTier(code, filename, tier, key) {
+async function estimateTier(pending, tier, key) {
   const estimate = await savant("/api/v1/audit-jobs/estimate", {
     method: "POST",
-    form: fileForm(code, filename, tier),
+    form: fileForm(pending, tier),
     key,
   });
   const files = Array.isArray(estimate.files) ? estimate.files : [];
@@ -158,7 +169,7 @@ async function estimateTier(code, filename, tier, key) {
   };
 }
 
-async function prepareAudit(code, filename) {
+async function prepareAudit(pending) {
   const key = savantApiKey();
   if (!key) {
     throw new SavantError("SAVANT_API_KEY is not set. Export it in the environment that launches this app.", 500);
@@ -167,7 +178,7 @@ async function prepareAudit(code, filename) {
   const settled = await Promise.all(
     TIERS.map(async (tier) => {
       try {
-        return { ok: true, quote: await estimateTier(code, filename, tier, key) };
+        return { ok: true, quote: await estimateTier(pending, tier, key) };
       } catch (err) {
         return { ok: false, err };
       }
@@ -177,7 +188,7 @@ async function prepareAudit(code, filename) {
   if (!priced.length) throw settled[0].err;
 
   const sourceId = randomUUID();
-  quotes.set(sourceId, { code, filename, quotes: priced, createdAt: Date.now() });
+  quotes.set(sourceId, { ...pending, quotes: priced, createdAt: Date.now() });
   return { status: "estimate", sourceId, quotes: priced };
 }
 
@@ -194,7 +205,7 @@ async function startAudit(sourceId, tier) {
   const key = savantApiKey();
   const created = await savant("/api/v1/audit-jobs", {
     method: "POST",
-    form: fileForm(pending.code, pending.filename, tier),
+    form: fileForm(pending, tier),
     key,
   });
   quotes.delete(sourceId);
@@ -316,8 +327,8 @@ function readBody(req) {
     let size = 0;
     req.on("data", (chunk) => {
       size += chunk.length;
-      if (size > 1_000_000) {
-        reject(new Error("The contract is larger than 1 MB."));
+      if (size > 28_000_000) {
+        reject(new Error("That upload is larger than 20 MB."));
         req.destroy();
         return;
       }
@@ -335,13 +346,26 @@ export async function handleAuditRequest(req, res) {
   try {
     if (req.method === "POST" && url.pathname === "/api/audit") {
       const body = JSON.parse((await readBody(req)) || "{}");
-      const code = typeof body.code === "string" ? body.code : "";
       const filename = typeof body.filename === "string" ? body.filename : "contract.rs";
+      if (typeof body.archive === "string" && body.archive) {
+        const archive = Buffer.from(body.archive, "base64");
+        if (!archive.length || !isSupportedArchive(archive)) {
+          send(res, 400, { error: "Use a .zip, .tar, or .tar.gz archive." });
+          return true;
+        }
+        if (archive.length > 20_000_000) {
+          send(res, 400, { error: "That archive is larger than 20 MB." });
+          return true;
+        }
+        send(res, 200, await prepareAudit({ code: "", filename, archive }));
+        return true;
+      }
+      const code = typeof body.code === "string" ? body.code : "";
       if (!code.trim()) {
         send(res, 400, { error: "Paste a contract first." });
         return true;
       }
-      send(res, 200, await prepareAudit(code, filename));
+      send(res, 200, await prepareAudit({ code, filename, archive: null }));
       return true;
     }
 

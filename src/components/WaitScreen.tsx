@@ -7,6 +7,7 @@ type Props = {
   startedAt: number;
   filename: string;
   lines: number;
+  detail?: string;
   note: string;
   kicker?: string;
   showWindow?: boolean;
@@ -21,6 +22,7 @@ export function WaitScreen({
   startedAt,
   filename,
   lines,
+  detail,
   note,
   kicker = "Audit in progress",
   showWindow = true,
@@ -52,7 +54,8 @@ export function WaitScreen({
       <p className="clock">{formatElapsed(elapsed)}</p>
       <p className="lead">{note}</p>
       <p className="meta">
-        {filename} · {lines} {lines === 1 ? "line" : "lines"}
+        {filename}
+        {detail ? ` · ${detail}` : ` · ${lines} ${lines === 1 ? "line" : "lines"}`}
         {stage ? ` · ${stage}` : ""}
         {progressLabel(progress)}
       </p>

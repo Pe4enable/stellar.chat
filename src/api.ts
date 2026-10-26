@@ -15,10 +15,11 @@ export async function prepareAudit(
   code: string,
   filename: string,
   signal: AbortSignal,
+  archive?: string,
 ): Promise<{ sourceId: string; quotes: Quote[] }> {
   const data = await request("/api/audit", {
     method: "POST",
-    body: JSON.stringify({ code, filename }),
+    body: JSON.stringify(archive ? { filename, archive } : { code, filename }),
     signal,
   });
   if (!Array.isArray(data.quotes) || typeof data.sourceId !== "string") {

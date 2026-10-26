@@ -4,7 +4,7 @@ import { Editor } from "./components/Editor";
 import { QuoteScreen } from "./components/QuoteScreen";
 import { ReportView } from "./components/ReportView";
 import { WaitScreen } from "./components/WaitScreen";
-import { formatElapsed, lineCount } from "./format";
+import { archiveKind, formatBytes, formatElapsed, isArchiveName, lineCount } from "./format";
 import { SAMPLE, SAMPLE_FILENAME } from "./sample";
 import {
   clearActiveAudit,
@@ -54,6 +54,7 @@ export function App() {
   const [stage, setStage] = useState("");
   const [progress, setProgress] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
+  const [archive, setArchive] = useState<{ name: string; base64: string; bytes: number } | null>(null);
 
   const shortcut = /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘" : "Ctrl";
 
@@ -99,7 +100,7 @@ export function App() {
     const startedAt = phase.startedAt;
     let active = true;
 
-    prepareAudit(code, filename, controller.signal)
+    prepareAudit(code, filename, controller.signal, archive?.base64)
       .then((priced) => {
         if (!active) return;
         if (!priced.quotes.length) {
@@ -173,7 +174,34 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase.name === "running" ? phase.auditId : ""]);
 
+  const onArchive = useCallback(async (file: File) => {
+    if (file.size > 20_000_000) {
+      setBanner("That archive is larger than 20 MB.");
+      return;
+    }
+    if (!file.size) {
+      setBanner("That archive is empty.");
+      return;
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (!archiveKind(bytes)) {
+      setBanner("Use a .zip, .tar, or .tar.gz archive.");
+      return;
+    }
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+    }
+    setArchive({ name: file.name, base64: btoa(binary), bytes: bytes.length });
+    setFilename(file.name);
+    setBanner("");
+  }, []);
+
   const onFile = useCallback(async (file: File) => {
+    if (isArchiveName(file.name)) {
+      await onArchive(file);
+      return;
+    }
     if (file.size > 1_000_000) {
       setBanner("That file is over 1 MB. Paste a smaller contract.");
       return;
@@ -183,10 +211,11 @@ export function App() {
       setBanner("That file does not look like source code.");
       return;
     }
+    setArchive(null);
     setBanner("");
     setCode(text);
     setFilename(file.name);
-  }, []);
+  }, [onArchive]);
 
   useEffect(() => {
     if (phase.name !== "edit") return;
@@ -247,7 +276,7 @@ export function App() {
   });
 
   function price() {
-    if (!code.trim() || phase.name === "preparing" || phase.name === "running") return;
+    if ((!archive && !code.trim()) || phase.name === "preparing" || phase.name === "running") return;
     setBanner("");
     setStage("");
     setProgress(null);
@@ -295,6 +324,7 @@ export function App() {
             </svg>
           </span>
           <div>
+            <p className="brand-kicker">AI security audits</p>
             <p className="brand-name">stellar.chat</p>
             <p className="brand-sub">Stellar smart contract audit</p>
           </div>
@@ -319,19 +349,24 @@ export function App() {
             }}
             onFilename={setFilename}
             onSubmit={price}
+            archiveLabel={archive ? formatBytes(archive.bytes) : undefined}
             onLoadExample={() => {
-              if (code.trim() && code !== SAMPLE && !window.confirm("Replace the current contract with the example?")) {
+              if (!archive && code.trim() && code !== SAMPLE && !window.confirm("Replace the current contract with the example?")) {
                 return;
               }
+              setArchive(null);
               setCode(SAMPLE);
               setFilename(SAMPLE_FILENAME);
               setBanner("");
             }}
             onClear={() => {
+              if (archive) setFilename("contract.rs");
+              setArchive(null);
               setCode("");
               setBanner("");
             }}
             onFile={(file) => void onFile(file)}
+            onArchive={(file) => void onArchive(file)}
           />
         ) : null}
 
@@ -339,8 +374,13 @@ export function App() {
           <WaitScreen
             startedAt={phase.startedAt}
             filename={filename}
-            lines={lineCount(code)}
-            note="Uploading the contract to Savant and asking for a price. Keep this tab open."
+            lines={archive ? 0 : lineCount(code)}
+            detail={archive ? "archive" : undefined}
+            note={
+              archive
+                ? "Uploading the archive to Savant and asking for a price. Keep this tab open."
+                : "Uploading the contract to Savant and asking for a price. Keep this tab open."
+            }
             kicker="Pricing"
             showWindow={false}
             cancelLabel="Cancel"
@@ -356,8 +396,13 @@ export function App() {
           <WaitScreen
             startedAt={phase.startedAt}
             filename={filename}
-            lines={lineCount(code)}
-            note="Savant is auditing the contract. You can close this tab; the audit keeps running, and a completion email may arrive."
+            lines={archive ? 0 : lineCount(code)}
+            detail={archive ? "archive" : undefined}
+            note={
+              archive
+                ? "Savant is auditing the archive. You can close this tab; the audit keeps running, and a completion email may arrive."
+                : "Savant is auditing the contract. You can close this tab; the audit keeps running, and a completion email may arrive."
+            }
             stage={stage}
             progress={progress}
             cancelLabel="Back to code"
@@ -394,7 +439,7 @@ export function App() {
 
       {dragging ? (
         <div className="drop-overlay">
-          <p>Drop the contract file</p>
+          <p>Drop a contract file or an archive</p>
         </div>
       ) : null}
     </div>
