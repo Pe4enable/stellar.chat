@@ -225,6 +225,12 @@ button, input, textarea { font: inherit; color: inherit; }
   padding: 6px 2px;
 }
 
+.endpoint-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .shortcut {
   display: flex;
   align-items: center;

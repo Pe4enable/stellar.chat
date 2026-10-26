@@ -105,7 +105,13 @@ export function Editor({
       </div>
 
       <div className="editor-footer">
-        <span className="endpoint">savant.chat · price shown before it starts</span>
+        <span className="endpoint">
+          powered by{" "}
+          <a className="endpoint-link" href="https://savant.chat" target="_blank" rel="noreferrer">
+            savant.chat
+          </a>{" "}
+          · price shown before it starts
+        </span>
         <div className="footer-actions">
           <span className="shortcut">
             <kbd>{shortcut}</kbd>
