@@ -64,7 +64,7 @@ export function App() {
         phase.name === "done"
           ? "Report — stellar.chat"
           : phase.name === "confirm"
-            ? "Choose an audit — stellar.chat"
+            ? "Start the audit — stellar.chat"
             : phase.name === "error"
               ? "Audit failed — stellar.chat"
               : "stellar.chat — contract audit";
@@ -348,6 +348,7 @@ export function App() {
             stage={stage}
             progress={progress}
             cancelLabel="Back to code"
+            webUrl={phase.webUrl}
             onCancel={backToCode}
           />
         ) : null}

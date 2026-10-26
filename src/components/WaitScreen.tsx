@@ -13,6 +13,7 @@ type Props = {
   stage?: string;
   progress?: number | null;
   cancelLabel: string;
+  webUrl?: string;
   onCancel: () => void;
 };
 
@@ -26,6 +27,7 @@ export function WaitScreen({
   stage,
   progress,
   cancelLabel,
+  webUrl,
   onCancel,
 }: Props) {
   const [now, setNow] = useState(() => Date.now());
@@ -65,6 +67,11 @@ export function WaitScreen({
               : "The bar marks the usual 15-minute window, not how finished the audit is."}
           </p>
         </>
+      ) : null}
+      {webUrl ? (
+        <a className="text-link" href={webUrl} target="_blank" rel="noreferrer">
+          Open on savant.chat
+        </a>
       ) : null}
       <p className="sr-only">Elapsed time: {minutes} minutes.</p>
       <button className="btn ghost" type="button" onClick={onCancel}>
