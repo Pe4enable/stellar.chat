@@ -20,6 +20,11 @@ function hasFiles(event: DragEvent): boolean {
   return Array.from(event.dataTransfer?.types ?? []).includes("Files");
 }
 
+function storedIsPreviousExample(): boolean {
+  const storedCode = readLocal("code");
+  return readLocal("filename") === "vault.rs" && !!storedCode?.includes("pub struct Vault");
+}
+
 function initialPhase(): Phase {
   const active = readActiveAudit();
   if (!active) return { name: "edit" };
@@ -33,8 +38,10 @@ function initialPhase(): Phase {
 }
 
 export function App() {
-  const [code, setCode] = useState(() => readLocal("code") ?? SAMPLE);
-  const [filename, setFilename] = useState(() => readLocal("filename") ?? SAMPLE_FILENAME);
+  const [code, setCode] = useState(() => (storedIsPreviousExample() ? SAMPLE : readLocal("code") ?? SAMPLE));
+  const [filename, setFilename] = useState(() =>
+    storedIsPreviousExample() ? SAMPLE_FILENAME : readLocal("filename") ?? SAMPLE_FILENAME,
+  );
   const [phase, setPhase] = useState<Phase>(initialPhase);
   const [banner, setBanner] = useState("");
   const [dragging, setDragging] = useState(false);
