@@ -6,8 +6,9 @@ dist
 !.env.example
 *.log
 
-# Stellar / Soroban contract artifacts
+# Rust / Soroban build output
 target/
+**/*.rs.bk
 *.wasm
 .soroban/
 .stellar/
