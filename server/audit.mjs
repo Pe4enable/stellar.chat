@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 const BASE = "https://savant.chat";
-const TIER = "advanced";
+const TIERS = ["lite", "advanced", "pro"];
 const POLL_SECONDS = 30;
 const QUOTE_TTL_MS = 30 * 60 * 1000;
 const ACTIVE = new Set(["pending", "delayed", "processing_audit"]);
@@ -116,10 +116,21 @@ async function prepareAudit(code, filename) {
     throw new SavantError("SAVANT_API_KEY is not set. Export it in the environment that launches this app.", 500);
   }
 
-  const quote = await estimateTier(code, filename, TIER, key);
+  const settled = await Promise.all(
+    TIERS.map(async (tier) => {
+      try {
+        return { ok: true, quote: await estimateTier(code, filename, tier, key) };
+      } catch (err) {
+        return { ok: false, err };
+      }
+    }),
+  );
+  const priced = settled.filter((item) => item.ok).map((item) => item.quote);
+  if (!priced.length) throw settled[0].err;
+
   const sourceId = randomUUID();
-  quotes.set(sourceId, { code, filename, quotes: [quote], createdAt: Date.now() });
-  return { status: "estimate", sourceId, quotes: [quote] };
+  quotes.set(sourceId, { code, filename, quotes: priced, createdAt: Date.now() });
+  return { status: "estimate", sourceId, quotes: priced };
 }
 
 async function startAudit(sourceId, tier) {
@@ -129,13 +140,13 @@ async function startAudit(sourceId, tier) {
     quotes.delete(sourceId);
     throw new SavantError("That price expired. Run the audit again to get a new one.", 409);
   }
-  const quote = pending.quotes.find((item) => item.tier === TIER);
-  if (!quote || tier !== TIER) throw new SavantError("Audits run on the advanced tier.", 400);
+  const quote = pending.quotes.find((item) => item.tier === tier);
+  if (!quote) throw new SavantError("Pick one of the prices Savant returned.", 400);
 
   const key = savantApiKey();
   const created = await savant("/api/v1/audit-jobs", {
     method: "POST",
-    form: fileForm(pending.code, pending.filename, TIER),
+    form: fileForm(pending.code, pending.filename, tier),
     key,
   });
   quotes.delete(sourceId);

@@ -42,4 +42,4 @@ The contract does not read environment variables. The dev server reads `SAVANT_A
 
 ## Demo
 
-`npm run dev` opens the audit UI. The example contract is `contracts/self-transfer-mint/src/lib.rs`. **Run audit** asks Savant for an advanced price. The audit starts only after **Start advanced**.
+`npm run dev` opens the audit UI. The example contract is `contracts/self-transfer-mint/src/lib.rs`. **Run audit** asks Savant for lite, advanced, and pro prices. The audit starts only after one of those prices is chosen.

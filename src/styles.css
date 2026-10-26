@@ -497,8 +497,9 @@ kbd {
 }
 
 .quote {
-  width: min(640px, 100%);
+  appearance: none;
   text-align: left;
+  cursor: pointer;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line-strong);
@@ -508,6 +509,9 @@ kbd {
   flex-direction: column;
   gap: 6px;
 }
+
+.quote:hover { border-color: var(--text); }
+.quote:disabled { opacity: 0.5; cursor: wait; }
 
 .quote-top, .quote-tier, .quote-cost, .quote-copy, .quote-meta { display: block; }
 

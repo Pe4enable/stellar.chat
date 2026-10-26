@@ -77,7 +77,7 @@ export function App() {
         phase.name === "done"
           ? "Report — stellar.chat"
           : phase.name === "confirm"
-            ? "Start the audit — stellar.chat"
+            ? "Choose an audit — stellar.chat"
             : phase.name === "error"
               ? "Audit failed — stellar.chat"
               : "stellar.chat — contract audit";
