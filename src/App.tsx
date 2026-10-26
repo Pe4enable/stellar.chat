@@ -22,7 +22,13 @@ function hasFiles(event: DragEvent): boolean {
 
 function storedIsPreviousExample(): boolean {
   const storedCode = readLocal("code");
-  return readLocal("filename") === "vault.rs" && !!storedCode?.includes("pub struct Vault");
+  if (!storedCode) return false;
+  if (readLocal("filename") === "vault.rs" && storedCode.includes("pub struct Vault")) return true;
+  return (
+    readLocal("filename") === SAMPLE_FILENAME &&
+    storedCode.includes("fn transfer_internal") &&
+    !storedCode.includes("Vulnerability:")
+  );
 }
 
 function initialPhase(): Phase {

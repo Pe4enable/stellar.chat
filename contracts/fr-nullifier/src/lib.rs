@@ -1,10 +1,10 @@
 #![no_std]
 
 // CVE-2026-32322 (soroban-sdk 25.2.0, GHSA-x2hw-px52-wp4m): Bn254 Fr
-// сравнивается как сырой U256 и не приводится по модулю порядка поля r
-// ни в from_bytes/from_u256, ни в PartialEq. Два равных элемента поля
-// с разной записью (каноническая и нередуцированная, значение >= r)
-// здесь не равны. spend считает такой nullifier новым и принимает повтор.
+// is compared as a raw U256 and is not reduced modulo the field order r
+// in from_bytes/from_u256 or in PartialEq. Two equal field elements with
+// different encodings (canonical and unreduced, value >= r) compare unequal
+// here. spend treats that nullifier as new and accepts a replay.
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, crypto::bn254::Fr, BytesN, Env, Vec,

@@ -1,63 +1,62 @@
-# Savant API — интеграция по API-ключу
+# Savant API — integration with an API key
 
-Документ описывает, как внешняя система запускает аудиты смарт-контрактов в Savant
-и забирает результаты, используя API-ключ. Источник — `backend/api/openapi.yaml`
-и код в ветке `main` (состояние на 2026-10-26). Схемы приведены дословно из
-OpenAPI-спецификации.
+This document describes how an external system starts smart-contract audits in Savant
+and retrieves the results using an API key. The source is `backend/api/openapi.yaml`
+and the code on the `main` branch (as of 2026-10-26). Schemas are copied verbatim from
+the OpenAPI specification.
 
 ---
 
-## 1. Что можно и чего нельзя делать по API-ключу
+## 1. What an API key can and cannot do
 
-| Действие | По ключу | Эндпоинт |
+| Action | With a key | Endpoint |
 | --- | --- | --- |
-| Узнать тарифы (цена за строку) | ✅ | `GET /api/v1/audit-jobs/plan-rates` |
-| Оценить стоимость аудита (без списания) | ✅ | `POST /api/v1/audit-jobs/estimate` |
-| Загрузить вспомогательный документ заранее | ✅ | `POST /api/v1/audit-documents` |
-| Запустить аудит из файлов / ZIP / TAR / TAR.GZ | ✅ | `POST /api/v1/audit-jobs` |
-| Список аудитов | ✅ | `GET /api/v1/audit-jobs` |
-| Статус и прогресс аудита | ✅ | `GET /api/v1/audit-jobs/{id}` |
-| Структурированный отчёт (JSON) | ✅ | `GET /api/v1/audit-jobs/{id}/report` |
-| Отчёт файлом (md / json / pdf / zip) | ✅ | `GET /api/v1/audit-jobs/{id}/report/download` |
-| Скачать исходники аудита | ✅ | `GET /api/v1/audit-jobs/{id}/source/download` |
-| Импорт из GitHub (приватный или публичный репо) | ❌ только сессия | `POST /api/v1/repo/imports`, `/repo/imports/public` |
-| Импорт контракта по адресу (Etherscan и т.п.) | ❌ только сессия | `POST /api/v1/contract-imports` |
-| Тестовый режим без LLM (dry run) | ❌ только админ из браузера | — |
-| Создание / ротация / удаление ключей | ❌ только сессия | `/api/v1/api-keys` |
-| Пополнение баланса, платежи, выплаты, KYC | ❌ только сессия | — |
+| Read plan rates (price per line) | ✅ | `GET /api/v1/audit-jobs/plan-rates` |
+| Estimate an audit (no charge) | ✅ | `POST /api/v1/audit-jobs/estimate` |
+| Upload a supporting document ahead of time | ✅ | `POST /api/v1/audit-documents` |
+| Start an audit from files / ZIP / TAR / TAR.GZ | ✅ | `POST /api/v1/audit-jobs` |
+| List audits | ✅ | `GET /api/v1/audit-jobs` |
+| Audit status and progress | ✅ | `GET /api/v1/audit-jobs/{id}` |
+| Structured report (JSON) | ✅ | `GET /api/v1/audit-jobs/{id}/report` |
+| Report file (md / json / pdf / zip) | ✅ | `GET /api/v1/audit-jobs/{id}/report/download` |
+| Download the audited sources | ✅ | `GET /api/v1/audit-jobs/{id}/source/download` |
+| Import from GitHub (private or public repo) | ❌ session only | `POST /api/v1/repo/imports`, `/repo/imports/public` |
+| Import a contract by address (Etherscan and similar) | ❌ session only | `POST /api/v1/contract-imports` |
+| Test mode without an LLM (dry run) | ❌ browser admin only | — |
+| Create / rotate / delete keys | ❌ session only | `/api/v1/api-keys` |
+| Top up a balance, payments, payouts, KYC | ❌ session only | — |
 
-Вебхуков о завершении аудита нет, статус нужно опрашивать (см. §6).
+There are no webhooks when an audit finishes. Poll the status (see §6).
 
 ---
 
-## 2. Базовые URL
+## 2. Base URLs
 
-| Окружение | Base URL |
+| Environment | Base URL |
 | --- | --- |
 | Production | `https://savant.chat` |
 | Dev / staging | `https://dev.savant.chat` |
 
-Все пути ниже относительны к Base URL и начинаются с `/api/v1`.
+Every path below is relative to the base URL and starts with `/api/v1`.
 
 ---
 
-## 3. API-ключи
+## 3. API keys
 
-### 3.1 Получение ключа
+### 3.1 Getting a key
 
-Ключи создаются в веб-интерфейсе Savant, то есть из браузерной сессии. Программно ключом нельзя выпустить другой ключ.
+Keys are created in the Savant web UI, that is, from a browser session. A key cannot mint another key.
 
-Свойства ключа:
+Key properties:
 
-- формат: `svk_<…>`;
-- полный текст показывается **один раз** при создании или ротации, в БД хранится
-  только префикс и SHA-256 хеш;
-- можно задать срок действия `expires_at`; просроченный или выключенный ключ
-  отклоняется с `401`;
-- ключ действует **от имени создавшего его пользователя** (`kind: user`):
-  тот же баланс, те же лимиты, те же аудиты.
+- format: `svk_<…>`;
+- the full text is shown **once**, at creation or rotation. The database stores
+  only the prefix and a SHA-256 hash;
+- `expires_at` is optional. An expired or disabled key is rejected with `401`;
+- the key acts **as the user who created it** (`kind: user`):
+  the same balance, the same limits, the same audits.
 
-Схемы, относящиеся к управлению ключами (для справки; эти эндпоинты требуют сессию):
+Schemas for key management (for reference; these endpoints require a session):
 
 ```yaml
 ApiKeyKind:
@@ -72,15 +71,15 @@ CreateApiKeyRequest:            # POST /api/v1/api-keys
     kind:       { $ref: ApiKeyKind }
     expires_at: { type: string, format: date-time }
 
-ApiKeyCreatedResponse:          # ответ на create и rotate
+ApiKeyCreatedResponse:          # response to create and rotate
   type: object
   required: [id, prefix, plaintext]
   properties:
     id:        { type: string, format: uuid }
     prefix:    { type: string }
-    plaintext: { type: string }   # полный ключ svk_…, показывается один раз
+    plaintext: { type: string }   # full svk_… key, shown once
 
-ApiKey:                         # элемент GET /api/v1/api-keys
+ApiKey:                         # item from GET /api/v1/api-keys
   type: object
   required: [id, prefix, name, kind, active, created_at]
   properties:
@@ -94,12 +93,12 @@ ApiKey:                         # элемент GET /api/v1/api-keys
     created_at:   { type: string, format: date-time }
 ```
 
-Остальные операции: `POST /api/v1/api-keys/{id}/rotate`,
+Other operations: `POST /api/v1/api-keys/{id}/rotate`,
 `PATCH /api/v1/api-keys/{id}` (`{"active": true|false}`), `DELETE /api/v1/api-keys/{id}`.
 
-### 3.2 Передача ключа
+### 3.2 Sending the key
 
-Любая из трёх форм заголовка `Authorization`:
+Any of the three `Authorization` header forms:
 
 ```
 Authorization: Bearer svk_xxxxxxxx
@@ -107,32 +106,32 @@ Authorization: ApiKey svk_xxxxxxxx
 Authorization: svk_xxxxxxxx
 ```
 
-- При наличии заголовка `Authorization` cookie сессии игнорируется.
-- CSRF-токен для запросов по ключу **не нужен**.
-- Неверный, выключенный или просроченный ключ → `401 unauthorized`.
+- When an `Authorization` header is present, the session cookie is ignored.
+- A CSRF token is **not** required for key requests.
+- A wrong, disabled, or expired key returns `401 unauthorized`.
 
-### 3.3 Контекст: личный или организация
+### 3.3 Context: personal or organization
 
-По умолчанию запрос выполняется в **личном** контексте владельца ключа: списания
-идут с личного баланса, видны только личные аудиты.
+By default a request runs in the key owner's **personal** context: charges
+come from the personal balance, and only personal audits are visible.
 
-Чтобы работать от имени организации, в которой состоит владелец ключа:
+To act for an organization the key owner belongs to:
 
 ```
 X-Savant-Context: org:<organization-uuid>
 ```
 
-- Аудит, созданный в контексте организации, оплачивается с баланса организации и
-  виден только в контексте этой организации.
-- Личные аудиты не видны в контексте организации, и наоборот: запрос «не того»
-  аудита возвращает `404`, а не `403`.
-- Пустой заголовок или `X-Savant-Context: personal` — личный контекст.
+- An audit created in an organization context is paid from the organization balance and
+  is visible only in that organization's context.
+- Personal audits are not visible in an organization context, and the reverse is also true: a request for the
+  wrong audit returns `404`, not `403`.
+- An empty header or `X-Savant-Context: personal` means the personal context.
 
 ---
 
-## 4. Общие соглашения
+## 4. Shared conventions
 
-### 4.1 Деньги
+### 4.1 Money
 
 ```yaml
 MoneyAmount:
@@ -148,11 +147,11 @@ AuditTokenRate:
   examples: ['0.12']
 ```
 
-Все суммы — USD, строкой. Не парсите их во float, используйте decimal.
+Every amount is USD, as a string. Do not parse these into floats. Use a decimal type.
 
-### 4.2 Ошибки
+### 4.2 Errors
 
-Все ошибки возвращаются в едином конверте:
+Every error uses the same envelope:
 
 ```yaml
 ErrorEnvelope:
@@ -166,19 +165,19 @@ ErrorBody:
   type: object
   required: [code, message]
   properties:
-    code:    { type: string }   # стабильный машиночитаемый код
-    message: { type: string }   # текст для человека
+    code:    { type: string }   # stable machine-readable code
+    message: { type: string }   # text for a person
 ```
 
-Пример:
+Example:
 
 ```json
 { "error": { "code": "unauthorized", "message": "authentication is required" } }
 ```
 
-Ветвитесь по `error.code`, а не по `message`.
+Branch on `error.code`, not on `message`.
 
-Особые конверты для `402` при создании аудита:
+Special envelopes for `402` when creating an audit:
 
 ```yaml
 InsufficientFundsErrorEnvelope:
@@ -213,19 +212,19 @@ MonthlyLimitExceededErrorEnvelope:
         upgrade_path:  { type: string }
 ```
 
-### 4.3 Rate limit и повторы
+### 4.3 Rate limits and retries
 
-- Создание аудитов ограничено окном per-actor и per-IP (по умолчанию 1000 запросов
-  на пользователя и 10000 на IP в час; значения настраиваются на сервере).
-- `429` и `503` приходят с заголовком `Retry-After` (секунды). Повторяйте не раньше.
-- `408 upload_timeout` — загрузка шла слишком медленно или слишком долго; повторите
-  или уменьшите архив.
+- Audit creation is limited per actor and per IP (by default 1000 requests
+  per user and 10000 per IP per hour; the server can change these values).
+- `429` and `503` include a `Retry-After` header (seconds). Do not retry sooner.
+- `408 upload_timeout` means the upload was too slow or took too long. Retry
+  or send a smaller archive.
 
 ---
 
-## 5. Запуск аудита
+## 5. Starting an audit
 
-### 5.1 Тарифы
+### 5.1 Plan rates
 
 ```
 GET /api/v1/audit-jobs/plan-rates
@@ -248,8 +247,8 @@ AuditPlanRate:
   type: object
   required: [rate]
   properties:
-    rate:     { $ref: AuditTokenRate }        # USD за строку исходного кода
-    discount: { $ref: AuditPlanRateDiscount } # есть, если к пользователю применена скидка
+    rate:     { $ref: AuditTokenRate }        # USD per source line
+    discount: { $ref: AuditPlanRateDiscount } # present when the user has a discount
 
 AuditPlanRateDiscount:
   type: object
@@ -259,7 +258,7 @@ AuditPlanRateDiscount:
     percent:       { type: number, minimum: 0, maximum: 100 }
 ```
 
-Тарифы (`tier`) — `AnalysisTier`:
+Tiers (`tier`) are `AnalysisTier`:
 
 ```yaml
 AnalysisTier:
@@ -267,9 +266,9 @@ AnalysisTier:
   enum: [lite, advanced, pro]
 ```
 
-### 5.2 Тело запроса (общее для estimate и create)
+### 5.2 Request body (shared by estimate and create)
 
-`Content-Type: multipart/form-data`. Схема:
+`Content-Type: multipart/form-data`. Schema:
 
 ```yaml
 AuditJobMultipartRequest:
@@ -278,82 +277,81 @@ AuditJobMultipartRequest:
   required: [tier]
   properties:
     tier:
-      $ref: AnalysisTier                  # обязательно: lite | advanced | pro
-    file:                                 # повторяемая часть: отдельный файл исходников
+      $ref: AnalysisTier                  # required: lite | advanced | pro
+    file:                                 # repeatable part: one source file
       oneOf: [binary, array of binary]
-    archive:                              # повторяемая часть: архив исходников
+    archive:                              # repeatable part: a source archive
       oneOf: [binary, array of binary]
-    document:                             # повторяемая часть: доп. документ (спецификация, whitepaper)
-      oneOf: [binary, array of binary]    # документы — бесплатный контекст
-    document-archive:                     # повторяемая часть: архив документов
+    document:                             # repeatable part: an extra document (spec, whitepaper)
+      oneOf: [binary, array of binary]    # documents are free context
+    document-archive:                     # repeatable part: a document archive
       oneOf: [binary, array of binary]
-    staged_document_ids:                  # id документов, загруженных заранее (§5.5)
+    staged_document_ids:                  # ids of documents uploaded ahead of time (§5.5)
       type: array
       maxItems: 500
       uniqueItems: true
       items: { type: string, format: uuid }
-    promoted_document_path:               # путь ВНУТРИ архива исходников, который считать документом
+    promoted_document_path:               # path INSIDE the source archive to treat as a document
       oneOf: [string, array of string]
-    scope:                                # ограничить аудит выбранными путями
+    scope:                                # limit the audit to selected paths
       oneOf: [string, array of string]
-    include_excluded:                     # включить файл, исключённый автоматически (тесты, конфиги…)
+    include_excluded:                     # include a file that was excluded automatically (tests, configs, …)
       oneOf: [string, array of string]
       maxItems: 500
-    agent_channel:  { $ref: AgentChannel }  # только админ-сессия — по ключу 403
-    agent_image:    { type: string }        # только админ-сессия — по ключу 403
-    agent_settings: { type: string }        # только админ-сессия — по ключу 403
-    bypass_charge:  { type: boolean }       # только админ; для остальных игнорируется
+    agent_channel:  { $ref: AgentChannel }  # admin session only — 403 with a key
+    agent_image:    { type: string }        # admin session only — 403 with a key
+    agent_settings: { type: string }        # admin session only — 403 with a key
+    bypass_charge:  { type: boolean }       # admin only; ignored for everyone else
 ```
 
-«Повторяемая часть» = в multipart можно передать несколько частей с одним именем
+A "repeatable part" means multipart may send several parts with the same name
 (`-F file=@A.sol -F file=@B.sol`, `-F scope=src/A.sol -F scope=src/B.sol`).
 
-**Архивы.** Формат определяется по содержимому (magic bytes), а не по расширению:
-поддерживаются `zip`, `tar`, `tar.gz`. Лимиты на распаковку:
+**Archives.** The format is detected from the contents (magic bytes), not the extension.
+Supported formats are `zip`, `tar`, and `tar.gz`. Unpack limits:
 
-| Лимит | Значение |
+| Limit | Value |
 | --- | --- |
-| Файлов в архиве | 60 000 |
-| Размер одного файла | 100 MiB |
-| Суммарный распакованный размер | 1 GiB |
-| Размер входного архива | 1152 MiB |
-| Коэффициент сжатия (zip-bomb) | 200× |
-| Глубина вложенности путей | 32 |
+| Files in the archive | 60 000 |
+| Size of one file | 100 MiB |
+| Total unpacked size | 1 GiB |
+| Input archive size | 1152 MiB |
+| Compression ratio (zip bomb) | 200× |
+| Path nesting depth | 32 |
 
-Небезопасные пути (`..`, абсолютные, NUL) отклоняются с `archive_unsafe`.
+Unsafe paths (`..`, absolute, NUL) are rejected with `archive_unsafe`.
 
-**Автоматическая классификация.** Сервер сам делит файлы на `source` (аудируется
-и оплачивается), `free_context` (передаётся агенту как контекст бесплатно) и
-`not_auditable`, и исключает тесты, зависимости, сгенерированный код, lock-файлы
-и т.п. Результат классификации виден в ответе estimate (§5.3). Чтобы вернуть
-исключённый файл в аудит — `include_excluded`; чтобы сузить аудит — `scope`.
+**Automatic classification.** The server splits files into `source` (audited
+and billed), `free_context` (passed to the agent as free context), and
+`not_auditable`. It excludes tests, dependencies, generated code, lockfiles,
+and similar files. The classification is in the estimate response (§5.3). To put
+an excluded file back into the audit, use `include_excluded`. To narrow the audit, use `scope`.
 
-Типичные коды `400`: `tier_invalid`, `source_binary`, `source_too_small`,
+Typical `400` codes: `tier_invalid`, `source_binary`, `source_too_small`,
 `no_source_files`, `document_empty`, `document_unsupported`,
 `scope_too_many_files`, `archive_too_many_files`, `archive_too_large`,
 `file_too_large`, `archive_unsafe`, `archive_invalid`.
 
-### 5.3 Оценка стоимости (бесплатно)
+### 5.3 Cost estimate (free)
 
 ```
 POST /api/v1/audit-jobs/estimate[?documents_only=true]
 ```
 
-Тело — то же, что в §5.2. Ничего не создаёт и не списывает. Рекомендуется
-вызывать перед созданием, чтобы показать цену и проверить, какие файлы попадут
-в аудит.
+The body is the same as in §5.2. This creates nothing and charges nothing. Call it
+before creating an audit to show the price and see which files will be included.
 
-`documents_only=true` — оценить только документы (требует `document`/`staged_document_ids`,
-запрещает `file`, `archive`, `scope`, `promoted_document_path`, `include_excluded`).
+`documents_only=true` estimates documents only (requires `document` or `staged_document_ids`,
+and forbids `file`, `archive`, `scope`, `promoted_document_path`, and `include_excluded`).
 
-Ответ `200`:
+`200` response:
 
 ```yaml
 AuditJobEstimateResponse:
   type: object
   required: [estimated_cost, token_count, files]
   properties:
-    estimated_cost:    { $ref: MoneyAmount }      # итог к списанию
+    estimated_cost:    { $ref: MoneyAmount }      # amount that would be reserved
     token_count:       { type: integer, minimum: 0 }
     files:
       type: array
@@ -369,10 +367,10 @@ AuditJobEstimateFile:
   required: [path, tokens, cost, standard_cost, selection_class]
   properties:
     path:               { type: string, minLength: 1 }
-    staged_document_id: { type: string, format: uuid }  # только для staged-документов
+    staged_document_id: { type: string, format: uuid }  # staged documents only
     tokens:             { type: integer, minimum: 1 }
     cost:               { $ref: MoneyAmount }
-    standard_cost:      { $ref: MoneyAmount }           # цена без скидки
+    standard_cost:      { $ref: MoneyAmount }           # price before the discount
     selection_class:    { $ref: AuditSourceFileClass }
     tier:               { $ref: AuditSourceTier }
     reason:             { type: string }
@@ -411,10 +409,10 @@ AuditSourceExclusionReason:
          hidden, minified-likely, large]
 ```
 
-Коды ответа: `200`, `400`, `401`, `408`, `409 staged_document_not_found`,
-`503` (+`Retry-After`, распаковка временно перегружена).
+Response codes: `200`, `400`, `401`, `408`, `409 staged_document_not_found`,
+`503` (plus `Retry-After`; unpacking is temporarily overloaded).
 
-Пример:
+Example:
 
 ```bash
 curl -sS https://savant.chat/api/v1/audit-jobs/estimate \
@@ -423,16 +421,16 @@ curl -sS https://savant.chat/api/v1/audit-jobs/estimate \
   -F archive=@contracts.zip
 ```
 
-### 5.4 Создание аудита
+### 5.4 Creating an audit
 
 ```
 POST /api/v1/audit-jobs
 ```
 
-Тело — §5.2. Сервер заново считает стоимость (цена из estimate не передаётся и
-не фиксируется), **резервирует** сумму на балансе и ставит аудит в очередь.
+The body is §5.2. The server prices the upload again (the estimate price is not sent and
+is not locked), **reserves** that amount on the balance, and queues the audit.
 
-Ответ `201`:
+`201` response:
 
 ```yaml
 AuditJobCreateResponse:
@@ -443,21 +441,21 @@ AuditJobCreateResponse:
     state:  { $ref: AuditJobState }
 ```
 
-Коды ответа:
+Response codes:
 
-| Код | Значение |
+| Code | Meaning |
 | --- | --- |
-| `201` | Аудит создан, средства зарезервированы |
-| `400` | Ошибка входных данных (коды в §5.2) |
-| `401` | Нет/неверный ключ |
-| `402` | `insufficient_funds` или `monthly_limit_exceeded` (схемы в §4.2) |
-| `403` | Нет прав создавать аудиты в этом контексте, либо переданы admin-only поля (`agent_*`) |
+| `201` | Audit created, funds reserved |
+| `400` | Bad input (codes in §5.2) |
+| `401` | Missing or invalid key |
+| `402` | `insufficient_funds` or `monthly_limit_exceeded` (schemas in §4.2) |
+| `403` | No permission to create audits in this context, or admin-only fields were sent (`agent_*`) |
 | `408` | `upload_timeout` |
 | `409` | `staged_document_not_found` |
-| `429` | Rate limit, см. `Retry-After` |
-| `503` | Зависимость недоступна / перегрузка распаковки / `runner_channel_unavailable`, см. `Retry-After` |
+| `429` | Rate limit; see `Retry-After` |
+| `503` | Dependency unavailable / unpack overload / `runner_channel_unavailable`; see `Retry-After` |
 
-Пример — ZIP:
+Example — ZIP:
 
 ```bash
 curl -sS https://savant.chat/api/v1/audit-jobs \
@@ -468,7 +466,7 @@ curl -sS https://savant.chat/api/v1/audit-jobs \
 # → {"job_id":"7c1e…","state":"pending"}
 ```
 
-Пример — отдельные файлы с ограничением scope и в контексте организации:
+Example — separate files, a scope limit, and an organization context:
 
 ```bash
 curl -sS https://savant.chat/api/v1/audit-jobs \
@@ -480,14 +478,14 @@ curl -sS https://savant.chat/api/v1/audit-jobs \
   -F scope=src/Vault.sol
 ```
 
-**Идемпотентности нет.** Повтор запроса создаёт второй аудит и второе резервирование.
-При сетевой ошибке после отправки сначала проверьте `GET /api/v1/audit-jobs`
-(новый аудит будет первым в списке), а потом решайте, повторять ли.
+**The request is not idempotent.** A retry creates a second audit and a second reservation.
+After a network error, check `GET /api/v1/audit-jobs` first
+(the new audit is first in the list), then decide whether to retry.
 
-### 5.5 Предзагрузка документов (опционально)
+### 5.5 Staging documents (optional)
 
-Для больших документов или повторного использования между estimate и create
-документ можно загрузить отдельно и потом ссылаться на него по id.
+For a large document, or to reuse one between estimate and create,
+upload it separately and then refer to it by id.
 
 ```
 POST /api/v1/audit-documents          (multipart: document, tier)
@@ -502,7 +500,7 @@ AuditDocumentStageRequest:
     document: { type: string, format: binary }
     tier:     { $ref: AnalysisTier }
 
-StagedAuditDocument:            # ответ 201
+StagedAuditDocument:            # 201 response
   type: object
   required: [id, name, size, sha256, tokens, cost, standard_cost, expires_at]
   properties:
@@ -516,15 +514,15 @@ StagedAuditDocument:            # ответ 201
     expires_at:    { type: string, format: date-time }
 ```
 
-- Документ живёт 24 часа, лимит — 2 GiB и 500 живых документов на пользователя.
-- Затем передайте `-F staged_document_ids=<id>` в estimate / create.
-- Документ одноразовый: после использования в аудите он «claimed», повтор → `409`.
+- A document lives for 24 hours. The limits are 2 GiB and 500 live documents per user.
+- Then pass `-F staged_document_ids=<id>` to estimate / create.
+- A document is single-use: after an audit claims it, another use returns `409`.
 
 ---
 
-## 6. Отслеживание статуса
+## 6. Tracking status
 
-### 6.1 Состояния аудита
+### 6.1 Audit states
 
 ```yaml
 AuditJobState:
@@ -532,25 +530,25 @@ AuditJobState:
   enum: [pending, delayed, processing_audit, completed, failed, cancelled]
 ```
 
-| Состояние | Значение | Терминальное |
+| State | Meaning | Terminal |
 | --- | --- | --- |
-| `pending` | В очереди | нет |
-| `delayed` | Отложен сервером, ещё будет выполнен | нет |
-| `processing_audit` | Выполняется | нет |
-| `completed` | Готов, отчёт доступен | **да** |
-| `failed` | Завершился ошибкой | **да** |
-| `cancelled` | Отменён | **да** |
+| `pending` | Queued | no |
+| `delayed` | Delayed by the server; it will still run | no |
+| `processing_audit` | Running | no |
+| `completed` | Done; the report is available | **yes** |
+| `failed` | Finished with an error | **yes** |
+| `cancelled` | Cancelled | **yes** |
 
-Длительность зависит от тарифа и объёма кода. Отмены аудита через API нет.
+Duration depends on the tier and the amount of code. The API cannot cancel an audit.
 
-### 6.2 Один аудит
+### 6.2 One audit
 
 ```
 GET /api/v1/audit-jobs/{id}
 ```
 
-Ответ `200` — `AuditJobDetail` (= `AuditJobSummary` + поля ниже). `404` — нет
-такого аудита или он не виден в текущем контексте.
+`200` is `AuditJobDetail` (`AuditJobSummary` plus the fields below). `404` means there is
+no such audit, or it is not visible in the current context.
 
 ```yaml
 AuditJobDetail:
@@ -559,11 +557,11 @@ AuditJobDetail:
     - type: object
       required: [stage_events]
       properties:
-        poc_files_available: { type: boolean }   # есть ли PoC-файлы (только для completed)
+        poc_files_available: { type: boolean }   # whether PoC files exist (completed only)
         stage_events:
           type: array
           items: { $ref: JobStageEvent }
-        report: { $ref: Report }                 # присутствует, когда state = completed
+        report: { $ref: Report }                 # present when state = completed
 
 AuditJobSummary:
   type: object
@@ -574,8 +572,8 @@ AuditJobSummary:
     analysis_tier:   { $ref: AnalysisTier }
     source_name:     { type: string, minLength: 1 }
     estimated_cost:  { $ref: MoneyAmount }
-    finding_counts:  { $ref: FindingCounts }      # после завершения
-    progress:        { type: integer, minimum: 0, maximum: 100 }  # только во время анализа
+    finding_counts:  { $ref: FindingCounts }      # after completion
+    progress:        { type: integer, minimum: 0, maximum: 100 }  # during analysis only
     agent_channel:   { type: string, enum: [stable, beta, alpha], nullable: true }
     agent_channel_degrade_reason:
       allOf: [{ $ref: AgentChannelDegradeReason }]
@@ -611,21 +609,21 @@ AgentChannelDegradeReason:
   enum: [registry_unavailable, channel_unpublished]
 ```
 
-`progress` в summary — последний процент стадии `audit`; для детального
-прогресса читайте `stage_events`. Причину `failed` смотрите в последнем событии
-со `status: failed` (`message`).
+`progress` on the summary is the latest percent of the `audit` stage. For finer
+progress, read `stage_events`. The `failed` reason is the last event
+with `status: failed` (`message`).
 
-### 6.3 Список аудитов
+### 6.3 Audit list
 
 ```
 GET /api/v1/audit-jobs?limit=50&cursor=<next_cursor>&status=<AuditJobState>
 ```
 
-| Параметр | Тип | По умолчанию |
+| Parameter | Type | Default |
 | --- | --- | --- |
 | `limit` | integer 1–100 | 50 |
-| `cursor` | string — `next_cursor` из предыдущей страницы | — |
-| `status` | `AuditJobState` | все |
+| `cursor` | string — `next_cursor` from the previous page | — |
+| `status` | `AuditJobState` | all |
 
 ```yaml
 AuditJobListResponse:
@@ -635,28 +633,28 @@ AuditJobListResponse:
     jobs:
       type: array
       items: { $ref: AuditJobSummary }
-    next_cursor: { type: string }   # отсутствует на последней странице
+    next_cursor: { type: string }   # absent on the last page
 ```
 
-### 6.4 Рекомендуемый опрос
+### 6.4 Recommended polling
 
-- Интервал 30–60 секунд; при `429`/`503` уважайте `Retry-After`.
-- Останавливайтесь на `completed`, `failed`, `cancelled`.
-- Для пачки аудитов эффективнее один `GET /api/v1/audit-jobs?status=processing_audit`,
-  чем N запросов по id.
+- Poll every 30–60 seconds. On `429` or `503`, honor `Retry-After`.
+- Stop on `completed`, `failed`, or `cancelled`.
+- For a batch, one `GET /api/v1/audit-jobs?status=processing_audit` is cheaper
+  than N requests by id.
 
 ---
 
-## 7. Получение результата
+## 7. Reading the result
 
-### 7.1 Структурированный отчёт
+### 7.1 Structured report
 
 ```
 GET /api/v1/audit-jobs/{id}/report
 ```
 
-`200` — `Report`; `404` — аудит не завершён, отчёта нет или аудит не виден.
-(Тот же объект приходит в поле `report` ответа `GET /audit-jobs/{id}`.)
+`200` is a `Report`. `404` means the audit is not finished, there is no report, or the audit is not visible.
+(The same object is the `report` field of `GET /audit-jobs/{id}`.)
 
 ```yaml
 Report:
@@ -701,7 +699,7 @@ ReportStats:
   required: [findings_count]
   properties:
     findings_count:          { type: integer, minimum: 0 }
-    # Остальные — измеренные счётчики, отсутствуют, если неизвестны (cap 1 000 000):
+    # The rest are measured counters, omitted when unknown (cap 1 000 000):
     files_analysed:          { type: integer }
     areas_examined:          { type: integer }
     areas_skipped:           { type: integer }
@@ -713,25 +711,25 @@ ReportStats:
     false_positives_removed: { type: integer }
 ```
 
-`verdict`: `proved` — подтверждено PoC; `partial` — частично; `theoretical` —
-теоретическая уязвимость; `unverified` — не проверялась.
+`verdict`: `proved` means confirmed by a PoC; `partial` means partly confirmed; `theoretical`
+means a theoretical vulnerability; `unverified` means it was not checked.
 
-### 7.2 Отчёт файлом
+### 7.2 Report file
 
 ```
 GET /api/v1/audit-jobs/{id}/report/download?format=md|json|pdf|zip
 ```
 
-| `format` | Содержимое |
+| `format` | Contents |
 | --- | --- |
-| `md` (по умолчанию) | Markdown-отчёт |
-| `json` | JSON-отчёт |
+| `md` (default) | Markdown report |
+| `json` | JSON report |
 | `pdf` | PDF |
-| `zip` | Архив со всеми форматами отчёта |
+| `zip` | Archive of every report format |
 
-Ответ `200` — бинарный поток (`application/octet-stream` или `application/zip`).
-`404` — нет отчёта / не виден; `409` — этот производный формат не был сгенерирован
-(например, PDF ещё не готов или не создавался).
+`200` is a binary stream (`application/octet-stream` or `application/zip`).
+`404` means there is no report or it is not visible. `409` means that derived format was not generated
+(for example, the PDF is not ready yet or was never created).
 
 ```bash
 curl -sS -o report.pdf \
@@ -739,18 +737,18 @@ curl -sS -o report.pdf \
   "https://savant.chat/api/v1/audit-jobs/$JOB_ID/report/download?format=pdf"
 ```
 
-### 7.3 Исходники аудита
+### 7.3 Audited sources
 
 ```
 GET /api/v1/audit-jobs/{id}/source/download
 ```
 
-`200` — исходный бандл, ровно то, что аудировалось. Удобно для повторного
-аудита того же кода. `404` — аудит не виден или бандл уже не хранится.
+`200` is the original bundle, exactly what was audited. Use it to audit the same code again.
+`404` means the audit is not visible or the bundle is no longer stored.
 
 ---
 
-## 8. Полный пример (bash)
+## 8. Full example (bash)
 
 ```bash
 #!/usr/bin/env bash
@@ -758,16 +756,16 @@ set -euo pipefail
 BASE=https://savant.chat
 AUTH="Authorization: Bearer $SAVANT_API_KEY"
 
-# 1. Оценка
+# 1. Estimate
 curl -fsS "$BASE/api/v1/audit-jobs/estimate" -H "$AUTH" \
   -F tier=lite -F archive=@contracts.zip | jq '{estimated_cost, files: [.files[] | {path, cost}]}'
 
-# 2. Создание
+# 2. Create
 JOB_ID=$(curl -fsS "$BASE/api/v1/audit-jobs" -H "$AUTH" \
   -F tier=lite -F archive=@contracts.zip | jq -r .job_id)
 echo "job: $JOB_ID"
 
-# 3. Ожидание
+# 3. Wait
 while :; do
   STATE=$(curl -fsS "$BASE/api/v1/audit-jobs/$JOB_ID" -H "$AUTH" | jq -r .state)
   echo "$(date +%T) $STATE"
@@ -775,7 +773,7 @@ while :; do
   sleep 60
 done
 
-# 4. Результат
+# 4. Result
 if [ "$STATE" = completed ]; then
   curl -fsS "$BASE/api/v1/audit-jobs/$JOB_ID/report" -H "$AUTH" \
     | jq '.findings[] | {severity, verdict, title, file: .location.file}'
@@ -787,7 +785,7 @@ else
 fi
 ```
 
-## 9. Пример (Python)
+## 9. Example (Python)
 
 ```python
 import time, requests
@@ -826,33 +824,33 @@ if detail["state"] == "completed":
         print(f.get("severity"), f.get("verdict"), f["title"], f["location"]["file"])
 ```
 
-Несколько частей с одним именем в `requests`: `files=[("file", open("A.sol","rb")), ("file", open("B.sol","rb"))]`,
+Several parts with the same name in `requests`: `files=[("file", open("A.sol","rb")), ("file", open("B.sol","rb"))]`,
 `data=[("tier","lite"), ("scope","src/A.sol"), ("scope","src/B.sol")]`.
 
 ---
 
-## 10. Тестирование интеграции
+## 10. Testing the integration
 
-Отдельного тестового режима для API-ключей сейчас нет: `agent_settings` с
-`dry_run` доступен только администратору из браузерной сессии, по ключу → `403`.
+There is no separate test mode for API keys right now. `agent_settings` with
+`dry_run` is available only to an administrator in a browser session. A key gets `403`.
 
-Варианты:
+Options:
 
-1. `POST /audit-jobs/estimate` и `GET /audit-jobs/plan-rates` — бесплатно,
-   проверяют аутентификацию, контекст, загрузку и разбор архива.
-2. Настоящий аудит тарифа `lite` на минимальном контракте — самый дешёвый полный
-   прогон create → poll → report.
-3. Стенд `https://dev.savant.chat` — отдельный аккаунт и ключ; возможна
-   конфигурация с холостым воркером (уточняйте у команды Savant).
+1. `POST /audit-jobs/estimate` and `GET /audit-jobs/plan-rates` are free.
+   They check authentication, context, upload, and archive parsing.
+2. A real `lite` audit of a minimal contract is the cheapest full
+   create → poll → report run.
+3. The `https://dev.savant.chat` stand uses a separate account and key. It may be
+   configured with an idle worker (ask the Savant team).
 
 ---
 
-## 11. Ограничения и известные особенности
+## 11. Limits and known behavior
 
-- Нет вебхуков/уведомлений о завершении — только опрос.
-- Нет отмены аудита через API.
-- Нет идемпотентного ключа при создании — повтор создаёт второй аудит.
-- GitHub и импорт по адресу контракта по ключу недоступны — загружайте архив
-  (например, `git archive --format=zip HEAD > src.zip`).
-- Ключ наследует все права владельца, включая админские: храните ключи
-  администраторов особенно бережно.
+- There are no webhooks or completion notifications. Poll.
+- The API cannot cancel an audit.
+- Create has no idempotency key. A retry creates a second audit.
+- GitHub import and import by contract address are not available to a key. Upload an archive
+  (for example, `git archive --format=zip HEAD > src.zip`).
+- A key inherits every permission of its owner, including admin permissions. Store
+  administrator keys with extra care.

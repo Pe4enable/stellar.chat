@@ -1,11 +1,11 @@
 #![no_std]
 
-// Уязвимость: transfer_internal читает балансы from и to в локальные
-// переменные до записи в storage. Если from == to, оба чтения — один и тот
-// же ключ Balance. Вторая запись использует устаревший снимок и
-// перезаписывает уже уменьшенный баланс значением (старый баланс + value).
-// Self-transfer поэтому увеличивает баланс отправителя на value — токены
-// минтятся, а total_supply не меняется. Сумма балансов расходится с total_supply.
+// Vulnerability: transfer_internal reads the from and to balances into local
+// variables before writing storage. If from == to, both reads hit the same
+// Balance key. The second write uses the stale snapshot and overwrites the
+// already reduced balance with (old balance + value). A self-transfer therefore
+// increases the sender's balance by value: tokens are minted, while total_supply
+// stays the same. The sum of balances diverges from total_supply.
 
 use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, Env, String};
 

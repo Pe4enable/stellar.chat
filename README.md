@@ -2,43 +2,44 @@
 
 ## Summary
 
-В репозитории сейчас один смарт-контракт Stellar (Soroban): `SuperToken` в `!contracts`. Это перевод простого fungible-токена на Soroban (`soroban-sdk` 29.0.1). Контракт выпускает фиксированный запас в конструкторе и даёт `transfer`, `approve` и `transfer_from`.
-
-Что это за продукт целиком, для кого он и как связан с названием `stellar.chat`, в коде не зафиксировано.
+The repository contains Stellar (Soroban) smart contracts and a web app that sends a contract to Savant for an audit. `SuperToken` in `contracts/self-transfer-mint` is a Soroban port of a simple fungible token (`soroban-sdk` 29.0.1). The contract mints a fixed supply in the constructor and exposes `transfer`, `approve`, and `transfer_from`.
 
 ## Problem
 
-В `transfer_internal` балансы отправителя и получателя читаются в локальные переменные до записи в storage. Если `from` и `to` — один и тот же адрес, вторая запись затирает уже уменьшенный баланс устаревшим снимком. Перевод самому себе увеличивает баланс на сумму перевода, а `total_supply` не меняется. Сумма балансов расходится с заявленным запасом.
-
-Описание относится к текущему контракту. Продуктовая проблема проекта шире этого бага или нет — не задано.
+In `transfer_internal`, the sender and recipient balances are read into local variables before they are written to storage. If `from` and `to` are the same address, the second write overwrites the already reduced balance with a stale snapshot. A self-transfer increases the balance by the transfer amount, and `total_supply` does not change. The sum of balances diverges from the stated supply.
 
 ## Setup
 
-Нужно для сборки контракта:
+Required to build the contract:
 
-- Rust 1.91.0. Версия закреплена в `!contracts/rust-toolchain.toml`.
-- Таргет `wasm32v1-none` (указан в том же файле).
-- [Stellar CLI](https://developers.stellar.org/docs/tools/cli/install-cli) — команда `stellar contract build`. В этой среде CLI не установлен.
-- Зависимость контракта: `soroban-sdk` 29.0.1 (`!contracts/Cargo.toml`).
+- Rust 1.91.0. The version is pinned in `contracts/rust-toolchain.toml`.
+- The `wasm32v1-none` target (listed in the same file).
+- [Stellar CLI](https://developers.stellar.org/docs/tools/cli/install-cli) — the `stellar contract build` command.
+- Contract dependency: `soroban-sdk` 29.0.1 (`contracts/self-transfer-mint/Cargo.toml`).
 
-Сеть (local / testnet / mainnet), аккаунт деплоя и способ запуска ноды в репозитории не заданы.
+The network (local / testnet / mainnet), the deploy account, and how to run a node are not specified in the repository.
+
+The audit app reads `SAVANT_API_KEY` from the environment. Do not commit the key.
 
 ## Installation
 
 ```bash
-cd !contracts
+cd contracts/self-transfer-mint
 cargo check
 stellar contract build
 ```
 
-`cargo check` проходит на Rust 1.91. Wasm-сборку через Stellar CLI отсюда не запускали: CLI нет.
+The web app:
+
+```bash
+npm install
+npm run dev
+```
 
 ## Environment variables
 
-Контракт их не читает. Файла `.env` в репозитории нет. Секреты, RPC и идентификатор контракта нигде не задаются.
+The contract does not read environment variables. The dev server reads `SAVANT_API_KEY` from the process environment. See `.env.example`. Do not put the key in the repository.
 
 ## Demo
 
-Сценария демо нет: нет скрипта деплоя, вызова контракта и интерфейса.
-
-Проверен только шаг компиляции библиотеки (`cargo check` в `!contracts`). Деплой, инициализация запаса и перевод токенов не описаны и не прогонялись.
+`npm run dev` opens the audit UI. The example contract is `contracts/self-transfer-mint/src/lib.rs`. **Run audit** asks Savant for an advanced price. The audit starts only after **Start advanced**.
