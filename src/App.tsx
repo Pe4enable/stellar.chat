@@ -1,32 +1,52 @@
 import { useCallback, useEffect, useState } from "react";
-import { isEndpoint, isUserAbort, runAudit } from "./api";
+import { delay, isUserAbort, pollAudit, prepareAudit, startAudit } from "./api";
 import { Editor } from "./components/Editor";
+import { QuoteScreen } from "./components/QuoteScreen";
 import { ReportView } from "./components/ReportView";
-import { SettingsDialog } from "./components/SettingsDialog";
 import { WaitScreen } from "./components/WaitScreen";
 import { formatElapsed, lineCount } from "./format";
 import { SAMPLE, SAMPLE_FILENAME } from "./sample";
-import { readLocal, writeLocal } from "./storage";
-import type { Phase } from "./types";
+import {
+  clearActiveAudit,
+  forgetStoredKey,
+  readActiveAudit,
+  readLocal,
+  writeActiveAudit,
+  writeLocal,
+} from "./storage";
+import type { Phase, Quote } from "./types";
 
 function hasFiles(event: DragEvent): boolean {
   return Array.from(event.dataTransfer?.types ?? []).includes("Files");
 }
 
+function initialPhase(): Phase {
+  const active = readActiveAudit();
+  if (!active) return { name: "edit" };
+  return {
+    name: "running",
+    startedAt: active.startedAt,
+    auditId: active.auditId,
+    pollAfterSeconds: active.pollAfterSeconds,
+    webUrl: active.webUrl,
+  };
+}
+
 export function App() {
   const [code, setCode] = useState(() => readLocal("code") ?? SAMPLE);
   const [filename, setFilename] = useState(() => readLocal("filename") ?? SAMPLE_FILENAME);
-  const [endpoint, setEndpoint] = useState(
-    () => readLocal("endpoint") ?? import.meta.env.VITE_AUDIT_ENDPOINT ?? "",
-  );
-  const [apiKey, setApiKey] = useState(() => readLocal("apiKey") ?? "");
-  const [phase, setPhase] = useState<Phase>({ name: "edit" });
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [endpointError, setEndpointError] = useState("");
+  const [phase, setPhase] = useState<Phase>(initialPhase);
   const [banner, setBanner] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [stage, setStage] = useState("");
+  const [progress, setProgress] = useState<number | null>(null);
+  const [starting, setStarting] = useState(false);
 
   const shortcut = /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘" : "Ctrl";
+
+  useEffect(() => {
+    forgetStoredKey();
+  }, []);
 
   useEffect(() => {
     const id = window.setTimeout(() => writeLocal("code", code), 250);
@@ -38,61 +58,50 @@ export function App() {
   }, [filename]);
 
   useEffect(() => {
-    writeLocal("endpoint", endpoint);
-  }, [endpoint]);
-
-  useEffect(() => {
-    writeLocal("apiKey", apiKey);
-  }, [apiKey]);
-
-  useEffect(() => {
     document.body.dataset.phase = phase.name;
-    if (phase.name === "running") {
-      const tick = () => {
-        document.title = `Audit · ${formatElapsed(Date.now() - phase.startedAt)} — stellar.chat`;
-      };
-      tick();
-      const id = window.setInterval(tick, 1000);
-      const warn = (event: BeforeUnloadEvent) => {
-        event.preventDefault();
-        event.returnValue = "";
-      };
-      window.addEventListener("beforeunload", warn);
-      return () => {
-        window.clearInterval(id);
-        window.removeEventListener("beforeunload", warn);
-      };
+    if (phase.name !== "running" && phase.name !== "preparing") {
+      document.title =
+        phase.name === "done"
+          ? "Report — stellar.chat"
+          : phase.name === "confirm"
+            ? "Choose an audit — stellar.chat"
+            : phase.name === "error"
+              ? "Audit failed — stellar.chat"
+              : "stellar.chat — contract audit";
+      return;
     }
 
-    document.title =
-      phase.name === "done"
-        ? "Report — stellar.chat"
-        : phase.name === "error"
-          ? "Audit failed — stellar.chat"
-          : "stellar.chat — contract audit";
-    return undefined;
+    const tick = () => {
+      const label = phase.name === "preparing" ? "Pricing" : "Audit";
+      document.title = `${label} · ${formatElapsed(Date.now() - phase.startedAt)} — stellar.chat`;
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
   }, [phase]);
 
   useEffect(() => {
-    if (phase.name !== "running") return;
+    if (phase.name !== "preparing") return;
     const controller = new AbortController();
     const startedAt = phase.startedAt;
     let active = true;
 
-    runAudit({
-      code,
-      filename,
-      endpoint: endpoint.trim(),
-      apiKey: apiKey.trim(),
-      signal: controller.signal,
-    })
-      .then((report) => {
+    prepareAudit(code, filename, controller.signal)
+      .then((priced) => {
         if (!active) return;
-        setPhase({ name: "done", report, elapsedMs: Date.now() - startedAt });
+        if (!priced.quotes.length) {
+          setPhase({
+            name: "error",
+            message: "Savant did not return a price for this contract.",
+            elapsedMs: Date.now() - startedAt,
+          });
+          return;
+        }
+        setPhase({ name: "confirm", startedAt, sourceId: priced.sourceId, quotes: priced.quotes });
       })
       .catch((err: unknown) => {
         if (!active || isUserAbort(err)) return;
-        const message = err instanceof Error ? err.message : "The audit failed.";
+        const message = err instanceof Error ? err.message : "Savant could not price this contract.";
         setPhase({ name: "error", message, elapsedMs: Date.now() - startedAt });
       });
 
@@ -100,9 +109,56 @@ export function App() {
       active = false;
       controller.abort();
     };
-    // The run is sealed when `phase` becomes "running". Later edits must not restart it.
+    // The upload is sealed when pricing starts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
+
+  useEffect(() => {
+    if (phase.name !== "running") return;
+    const controller = new AbortController();
+    const startedAt = phase.startedAt;
+    const auditId = phase.auditId;
+    let active = true;
+    let waitMs = phase.pollAfterSeconds * 1000;
+
+    writeActiveAudit({
+      auditId,
+      startedAt,
+      pollAfterSeconds: phase.pollAfterSeconds,
+      webUrl: phase.webUrl,
+    });
+
+    (async () => {
+      try {
+        for (;;) {
+          await delay(waitMs, controller.signal);
+          if (!active) return;
+          const update = await pollAudit(auditId, controller.signal);
+          if (!active) return;
+          if (update.done) {
+            clearActiveAudit();
+            setPhase({ name: "done", report: update.report, elapsedMs: Date.now() - startedAt });
+            return;
+          }
+          setStage(update.stage);
+          setProgress(update.progress);
+          waitMs = update.pollAfterSeconds * 1000;
+        }
+      } catch (err) {
+        if (!active || isUserAbort(err)) return;
+        clearActiveAudit();
+        const message = err instanceof Error ? err.message : "The audit failed.";
+        setPhase({ name: "error", message, elapsedMs: Date.now() - startedAt });
+      }
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+    // Polling follows this audit id. Stage updates stay outside this object.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase.name === "running" ? phase.auditId : ""]);
 
   const onFile = useCallback(async (file: File) => {
     if (file.size > 1_000_000) {
@@ -167,33 +223,50 @@ export function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (settingsOpen || phase.name !== "edit") return;
+      if (phase.name !== "edit") return;
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         event.preventDefault();
-        start();
+        price();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  function start() {
-    if (!code.trim() || phase.name === "running") return;
-    if (!isEndpoint(endpoint.trim())) {
-      setEndpointError("Enter the audit service URL — https://… or a path like /audit-service/…");
-      setSettingsOpen(true);
-      return;
-    }
-    setEndpointError("");
+  function price() {
+    if (!code.trim() || phase.name === "preparing" || phase.name === "running") return;
     setBanner("");
-    setPhase({ name: "running", startedAt: Date.now() });
+    setStage("");
+    setProgress(null);
+    setPhase({ name: "preparing", startedAt: Date.now() });
   }
 
-  function loadExample() {
-    if (code.trim() && code !== SAMPLE && !window.confirm("Replace the current contract with the example?")) return;
-    setCode(SAMPLE);
-    setFilename(SAMPLE_FILENAME);
-    setBanner("");
+  async function confirm(quote: Quote) {
+    if (phase.name !== "confirm" || starting) return;
+    const startedAt = phase.startedAt;
+    setStarting(true);
+    try {
+      const started = await startAudit(phase.sourceId, quote.tier, new AbortController().signal);
+      setStage("Queued");
+      setProgress(0);
+      setPhase({
+        name: "running",
+        startedAt,
+        auditId: started.auditId,
+        pollAfterSeconds: started.pollAfterSeconds,
+        webUrl: started.webUrl,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Savant did not start the audit.";
+      setPhase({ name: "error", message, elapsedMs: Date.now() - startedAt });
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  function backToCode() {
+    clearActiveAudit();
+    setPhase({ name: "edit" });
   }
 
   return (
@@ -213,11 +286,6 @@ export function App() {
             <p className="brand-sub">Stellar smart contract audit</p>
           </div>
         </div>
-        {phase.name === "edit" || phase.name === "error" ? (
-          <button className="btn small ghost" type="button" onClick={() => setSettingsOpen(true)}>
-            Service
-          </button>
-        ) : null}
       </header>
 
       <main className="main">
@@ -231,16 +299,21 @@ export function App() {
           <Editor
             code={code}
             filename={filename}
-            endpoint={endpoint}
             shortcut={shortcut}
             onCode={(value) => {
               setCode(value);
               if (banner) setBanner("");
             }}
             onFilename={setFilename}
-            onSubmit={start}
-            onOpenSettings={() => setSettingsOpen(true)}
-            onLoadExample={loadExample}
+            onSubmit={price}
+            onLoadExample={() => {
+              if (code.trim() && code !== SAMPLE && !window.confirm("Replace the current contract with the example?")) {
+                return;
+              }
+              setCode(SAMPLE);
+              setFilename(SAMPLE_FILENAME);
+              setBanner("");
+            }}
             onClear={() => {
               setCode("");
               setBanner("");
@@ -249,13 +322,33 @@ export function App() {
           />
         ) : null}
 
+        {phase.name === "preparing" ? (
+          <WaitScreen
+            startedAt={phase.startedAt}
+            filename={filename}
+            lines={lineCount(code)}
+            note="Uploading the contract to Savant and asking for a price. Keep this tab open."
+            kicker="Pricing"
+            showWindow={false}
+            cancelLabel="Cancel"
+            onCancel={backToCode}
+          />
+        ) : null}
+
+        {phase.name === "confirm" ? (
+          <QuoteScreen quotes={phase.quotes} busy={starting} onStart={(quote) => void confirm(quote)} onBack={backToCode} />
+        ) : null}
+
         {phase.name === "running" ? (
           <WaitScreen
             startedAt={phase.startedAt}
             filename={filename}
             lines={lineCount(code)}
-            endpoint={endpoint}
-            onCancel={() => setPhase({ name: "edit" })}
+            note="Savant is auditing the contract. You can close this tab; the audit keeps running, and a completion email may arrive."
+            stage={stage}
+            progress={progress}
+            cancelLabel="Back to code"
+            onCancel={backToCode}
           />
         ) : null}
 
@@ -264,7 +357,7 @@ export function App() {
             filename={filename}
             elapsedMs={phase.elapsedMs}
             report={phase.report}
-            onBack={() => setPhase({ name: "edit" })}
+            onBack={backToCode}
           />
         ) : null}
 
@@ -274,13 +367,10 @@ export function App() {
             <h2>No report came back</h2>
             <p className="lead">{phase.message}</p>
             <div className="row">
-              <button className="btn primary" type="button" onClick={start}>
+              <button className="btn primary" type="button" onClick={price}>
                 Try again
               </button>
-              <button className="btn ghost" type="button" onClick={() => setSettingsOpen(true)}>
-                Check endpoint
-              </button>
-              <button className="btn ghost" type="button" onClick={() => setPhase({ name: "edit" })}>
+              <button className="btn ghost" type="button" onClick={backToCode}>
                 Back to code
               </button>
             </div>
@@ -293,19 +383,6 @@ export function App() {
           <p>Drop the contract file</p>
         </div>
       ) : null}
-
-      <SettingsDialog
-        open={settingsOpen}
-        endpoint={endpoint}
-        apiKey={apiKey}
-        error={endpointError}
-        onEndpoint={(value) => {
-          setEndpoint(value);
-          if (endpointError) setEndpointError("");
-        }}
-        onApiKey={setApiKey}
-        onClose={() => setSettingsOpen(false)}
-      />
     </div>
   );
 }

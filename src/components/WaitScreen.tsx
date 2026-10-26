@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { endpointLabel, formatElapsed } from "../format";
+import { formatElapsed } from "../format";
 
 const WINDOW_MS = 15 * 60 * 1000;
 
@@ -7,11 +7,27 @@ type Props = {
   startedAt: number;
   filename: string;
   lines: number;
-  endpoint: string;
+  note: string;
+  kicker?: string;
+  showWindow?: boolean;
+  stage?: string;
+  progress?: number | null;
+  cancelLabel: string;
   onCancel: () => void;
 };
 
-export function WaitScreen({ startedAt, filename, lines, endpoint, onCancel }: Props) {
+export function WaitScreen({
+  startedAt,
+  filename,
+  lines,
+  note,
+  kicker = "Audit in progress",
+  showWindow = true,
+  stage,
+  progress,
+  cancelLabel,
+  onCancel,
+}: Props) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -30,26 +46,36 @@ export function WaitScreen({ startedAt, filename, lines, endpoint, onCancel }: P
           <span />
         </div>
       </div>
-      <p className="kicker">Audit in progress</p>
+      <p className="kicker">{kicker}</p>
       <p className="clock">{formatElapsed(elapsed)}</p>
-      <p className="lead">
-        This usually takes 10–15 minutes. Keep this tab open — closing it stops the request.
-      </p>
+      <p className="lead">{note}</p>
       <p className="meta">
-        {filename} · {lines} {lines === 1 ? "line" : "lines"} · {endpointLabel(endpoint)}
+        {filename} · {lines} {lines === 1 ? "line" : "lines"}
+        {stage ? ` · ${stage}` : ""}
+        {progressLabel(progress)}
       </p>
-      <div className="timebar" aria-hidden="true">
-        <span style={{ width: `${ratio}%` }} />
-      </div>
-      <p className="hint">
-        {ratio >= 100
-          ? "Past the usual 15-minute window. Still waiting on the service."
-          : "The bar marks the usual 15-minute window, not how finished the audit is."}
-      </p>
+      {showWindow ? (
+        <>
+          <div className="timebar" aria-hidden="true">
+            <span style={{ width: `${ratio}%` }} />
+          </div>
+          <p className="hint">
+            {ratio >= 100
+              ? "Past the usual 15-minute window. Still waiting on Savant."
+              : "The bar marks the usual 15-minute window, not how finished the audit is."}
+          </p>
+        </>
+      ) : null}
       <p className="sr-only">Elapsed time: {minutes} minutes.</p>
       <button className="btn ghost" type="button" onClick={onCancel}>
-        Cancel
+        {cancelLabel}
       </button>
     </section>
   );
+}
+
+function progressLabel(progress: number | null | undefined): string {
+  if (progress == null) return "";
+  const percent = progress <= 1 ? Math.round(progress * 100) : Math.round(progress);
+  return ` · ${percent}%`;
 }

@@ -26,17 +26,3 @@ export function languageFromFilename(filename: string): { id: string; label: str
   }
 }
 
-export function endpointLabel(endpoint: string): string {
-  const value = endpoint.trim();
-  if (!value) return "Set audit endpoint";
-  try {
-    const url = new URL(value);
-    return url.host + url.pathname;
-  } catch {
-    return value;
-  }
-}
-
-export function cx(...parts: Array<string | false | null | undefined>): string {
-  return parts.filter(Boolean).join(" ");
-}

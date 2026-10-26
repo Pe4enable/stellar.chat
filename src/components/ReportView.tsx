@@ -65,6 +65,14 @@ export function ReportView({ filename, elapsedMs, report, onBack }: Props) {
           <h2>{filename}</h2>
           <p className="meta">
             Stellar · {language.label} · {findingLabel} · finished in {formatElapsed(elapsedMs)}
+            {report.webUrl ? (
+              <>
+                {" · "}
+                <a className="text-link" href={report.webUrl} target="_blank" rel="noreferrer">
+                  Open on savant.chat
+                </a>
+              </>
+            ) : null}
           </p>
         </div>
         <div className="row">
@@ -113,6 +121,7 @@ export function ReportView({ filename, elapsedMs, report, onBack }: Props) {
               <article key={`${finding.title}-${index}`} className={`finding sev-${finding.severity}`}>
                 <div className="finding-top">
                   <span className={`sev-label sev-${finding.severity}`}>{SEVERITY_LABEL[finding.severity]}</span>
+                  {finding.verdict ? <span className="loc">{finding.verdict}</span> : null}
                   {finding.location ? <span className="loc">{finding.location}</span> : null}
                 </div>
                 <h3>{finding.title}</h3>
@@ -134,12 +143,14 @@ export function ReportView({ filename, elapsedMs, report, onBack }: Props) {
         </>
       ) : null}
 
-      {showRaw ? <p className="lead">The service response had no recognized findings. The raw body is below.</p> : null}
+      {showRaw ? <p className="lead">Savant returned a report without individual findings.</p> : null}
 
-      <details className="raw" open={showRaw}>
-        <summary>Raw response</summary>
-        <pre>{report.raw}</pre>
-      </details>
+      {report.raw ? (
+        <details className="raw" open={showRaw}>
+          <summary>Raw response</summary>
+          <pre>{report.raw}</pre>
+        </details>
+      ) : null}
     </section>
   );
 }

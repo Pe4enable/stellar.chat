@@ -1,15 +1,13 @@
 import { useRef, type KeyboardEvent } from "react";
-import { endpointLabel, languageFromFilename, lineCount } from "../format";
+import { languageFromFilename, lineCount } from "../format";
 
 type Props = {
   code: string;
   filename: string;
-  endpoint: string;
   shortcut: string;
   onCode: (value: string) => void;
   onFilename: (value: string) => void;
   onSubmit: () => void;
-  onOpenSettings: () => void;
   onLoadExample: () => void;
   onClear: () => void;
   onFile: (file: File) => void;
@@ -18,12 +16,10 @@ type Props = {
 export function Editor({
   code,
   filename,
-  endpoint,
   shortcut,
   onCode,
   onFilename,
   onSubmit,
-  onOpenSettings,
   onLoadExample,
   onClear,
   onFile,
@@ -109,13 +105,7 @@ export function Editor({
       </div>
 
       <div className="editor-footer">
-        <button
-          className={endpoint.trim() ? "endpoint" : "endpoint missing"}
-          type="button"
-          onClick={onOpenSettings}
-        >
-          {endpointLabel(endpoint)}
-        </button>
+        <span className="endpoint">savant.chat · price shown before it starts</span>
         <div className="footer-actions">
           <span className="shortcut">
             <kbd>{shortcut}</kbd>
@@ -126,7 +116,7 @@ export function Editor({
             type="button"
             onClick={onSubmit}
             disabled={!code.trim()}
-            title={code.trim() ? "Send this contract to the audit service" : "Paste a contract first"}
+            title={code.trim() ? "Price this contract with Savant" : "Paste a contract first"}
           >
             Run audit
           </button>
